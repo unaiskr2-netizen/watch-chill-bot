@@ -1,5 +1,5 @@
 const API = "https://api.telegram.org";
-
+const OWNER_ID = "8719558690";
 // --- Telegram Helpers ---
 async function telegram(env, method, data) {
   const response = await fetch(`${API}/bot${env.BOT_TOKEN}/${method}`, {
