@@ -95,8 +95,27 @@ async function handleMessage(message, env) {
     return;
   }
 
-  if (text === "/myid") {
-    await sendText(env, chatId, `നിങ്ങളുടെ ഐഡി: ${userId}\nബോട്ടിലെ ADMIN_ID: ${env.ADMIN_ID}`);
+  // --- ID Check (Admin Test) ---
+  if (text === "/adminid") {
+    await sendText(env, chatId, `Your ID: ${userId}\nBot ADMIN_ID: ${env.ADMIN_ID}`);
+    return;
+  }
+
+  // --- Maintenance Mode Command ---
+  if (text === "/maintenance") {
+    if (!isOwner(userId, env)) {
+      await sendText(env, chatId, "⛔ Owner only.");
+      return;
+    }
+    const currentMode = await isMaintenanceMode(env);
+    const newMode = currentMode ? "false" : "true";
+    await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind("maintenance_mode", newMode).run();
+    
+    if (newMode === "true") {
+      await sendText(env, chatId, "🛠️ Maintenance Mode is now ON.");
+    } else {
+      await sendText(env, chatId, "✅ Maintenance Mode is now OFF.");
+    }
     return;
   }
 
@@ -191,14 +210,12 @@ async function handleCallback(update, env) {
 
   await answerCallback(env, query.id);
 
-  // Movie Details Click
   if (data.startsWith("m_")) {
     const movieId = data.split("_")[1];
     await showMovie(env, chatId, movieId);
     return;
   }
 
-  // Download Button Click
   if (data.startsWith("v_")) {
     const movieId = data.split("_")[1];
     const movie = await env.DB.prepare("SELECT telegram_file_id, title FROM movies WHERE id = ?").bind(movieId).first();
