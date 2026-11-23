@@ -1,5 +1,6 @@
 const API = "https://api.telegram.org";
-const OWNER_ID = "8719558690";
+const OWNER_ID = "8719558690"; // നിങ്ങളുടെ ഐഡി ഇവിടെ നേരിട്ട് കൊടുത്തിരിക്കുന്നു
+
 // --- Telegram Helpers ---
 async function telegram(env, method, data) {
   const response = await fetch(`${API}/bot${env.BOT_TOKEN}/${method}`, {
@@ -20,7 +21,7 @@ async function answerCallback(env, callbackId) {
 
 // --- Database & Auth Helpers ---
 function isOwner(userId, env) {
-  const adminId = env.ADMIN_ID ? String(env.ADMIN_ID).trim() : "";
+  const adminId = env.ADMIN_ID ? String(env.ADMIN_ID).trim() : OWNER_ID;
   const currentId = String(userId).trim();
   return currentId === adminId;
 }
@@ -95,13 +96,11 @@ async function handleMessage(message, env) {
     return;
   }
 
-  // --- ID Check (Admin Test) ---
   if (text === "/adminid") {
-    await sendText(env, chatId, `Your ID: ${userId}\nBot ADMIN_ID: ${env.ADMIN_ID}`);
+    await sendText(env, chatId, `Your ID: ${userId}\nBot ADMIN_ID: ${env.ADMIN_ID || OWNER_ID}`);
     return;
   }
 
-  // --- Maintenance Mode Command ---
   if (text === "/maintenance") {
     if (!isOwner(userId, env)) {
       await sendText(env, chatId, "⛔ Owner only.");
