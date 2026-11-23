@@ -1,9 +1,0 @@
-name = "watch-chill-bot"
-main = "src/index.js"
-compatibility_date = "2024-01-01"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "watch-chill-db"
-# നിങ്ങൾ Cloudflare-ൽ ഡാറ്റാബേസ് ഉണ്ടാക്കിയ ശേഷം ഇവിടെ database_id കോപ്പി ചെയ്ത് ചേർക്കണം
-database_id = "YOUR_DATABASE_ID_HERE"
