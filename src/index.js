@@ -14,9 +14,15 @@ async function sendText(env, chatId, text) {
   return telegram(env, "sendMessage", { chat_id: chatId, text });
 }
 
+async function answerCallback(env, callbackId) {
+  return telegram(env, "answerCallbackQuery", { callback_query_id: callbackId });
+}
+
 // --- Database & Auth Helpers ---
 function isOwner(userId, env) {
-  return Boolean(userId) && String(userId) === String(env.ADMIN_ID);
+  const adminId = env.ADMIN_ID ? String(env.ADMIN_ID).trim() : "";
+  const currentId = String(userId).trim();
+  return currentId === adminId;
 }
 
 async function isMaintenanceMode(env) {
@@ -24,6 +30,39 @@ async function isMaintenanceMode(env) {
     const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'maintenance_mode'").first();
     return row?.value === "true";
   } catch(e) { return false; }
+}
+
+// --- Movie Display (UI) ---
+async function showMovie(env, chatId, movieId, edit = false, messageId = null) {
+  const movie = await env.DB.prepare("SELECT * FROM movies WHERE id = ?").bind(movieId).first();
+  if (!movie) return;
+
+  let caption = `🎬 <b>${movie.title}</b>`;
+  if (movie.year) caption += `\n📅 Year: ${movie.year}`;
+  if (movie.language) caption += `\n🌐 Language: ${movie.language}`;
+  if (movie.description) caption += `\n\n${movie.description}`;
+
+  const keyboard = [[{
+    text: "📥 Download / Watch",
+    callback_data: `v_${movie.id}`
+  }]];
+
+  if (edit && messageId) {
+    await telegram(env, "editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text: caption,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  } else {
+    await telegram(env, "sendMessage", {
+      chat_id: chatId,
+      text: caption,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  }
 }
 
 // --- Main Message Handler ---
@@ -52,11 +91,16 @@ async function handleMessage(message, env) {
   }
 
   if (text === "/help") {
-    await sendText(env, chatId, "ℹ️ How to use WATCH & CHILL:\n\n- Send a movie name to search.\n- Use /request to ask for a movie.");
+    await sendText(env, chatId, "ℹ️ How to use WATCH & CHILL:\n\n- Send a movie name to search.\n- Use /request to ask for a movie.\n- Admin: /addmovie to add new movie.");
     return;
   }
 
-  // --- Admin Movie Upload Feature ---
+  if (text === "/myid") {
+    await sendText(env, chatId, `നിങ്ങളുടെ ഐഡി: ${userId}\nബോട്ടിലെ ADMIN_ID: ${env.ADMIN_ID}`);
+    return;
+  }
+
+  // --- Admin Movie Upload ---
   if (text === "/addmovie") {
     if (!isOwner(userId, env)) {
       await sendText(env, chatId, "⛔ Only the Owner can add movies.");
@@ -67,7 +111,6 @@ async function handleMessage(message, env) {
     return;
   }
 
-  // --- Upload Flow Steps ---
   const uploadStep = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(`upload_step_${userId}`).first();
   
   if (uploadStep) {
@@ -106,7 +149,6 @@ async function handleMessage(message, env) {
           "INSERT INTO movies (title, year, description, telegram_file_id) VALUES (?, ?, ?, ?)"
         ).bind(title?.value, year?.value, desc?.value, fileId).run();
 
-        // Clean up temp data
         await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run();
         await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
 
@@ -119,17 +161,55 @@ async function handleMessage(message, env) {
     }
   }
 
-  // --- Search Feature ---
-  if (text && !text.startsWith("/")) {
+  // --- User Search Feature ---
+  if (text && !text.startsWith("/") && text !== "📩 Request a Movie") {
     const search = `%${text}%`;
-    const movies = await env.DB.prepare("SELECT title FROM movies WHERE title LIKE ? LIMIT 5").bind(search).all();
+    const movies = await env.DB.prepare("SELECT id, title, year FROM movies WHERE title LIKE ? LIMIT 10").bind(search).all();
     
     if (movies.results.length === 0) {
       await sendText(env, chatId, "😕 No movies found for that search.");
     } else {
-      const reply = "🔎 Found movies:\n\n" + movies.results.map(m => `🎬 ${m.title}`).join("\n");
-      await sendText(env, chatId, reply);
+      const keyboard = movies.results.map(m => [{
+        text: `🎬 ${m.title}${m.year ? ` (${m.year})` : ""}`,
+        callback_data: `m_${m.id}`
+      }]);
+      await telegram(env, "sendMessage", {
+        chat_id: chatId,
+        text: "🔎 Search Results:",
+        reply_markup: { inline_keyboard: keyboard }
+      });
     }
+  }
+}
+
+// --- Callback Handler (Button Clicks) ---
+async function handleCallback(update, env) {
+  const query = update.callback_query;
+  const data = query.data || "";
+  const chatId = query.message.chat.id;
+  const messageId = query.message.message_id;
+
+  await answerCallback(env, query.id);
+
+  // Movie Details Click
+  if (data.startsWith("m_")) {
+    const movieId = data.split("_")[1];
+    await showMovie(env, chatId, movieId);
+    return;
+  }
+
+  // Download Button Click
+  if (data.startsWith("v_")) {
+    const movieId = data.split("_")[1];
+    const movie = await env.DB.prepare("SELECT telegram_file_id, title FROM movies WHERE id = ?").bind(movieId).first();
+    if (movie && movie.telegram_file_id) {
+      await telegram(env, "sendDocument", {
+        chat_id: chatId,
+        document: movie.telegram_file_id,
+        caption: `Here is your movie: ${movie.title} 🍿`
+      });
+    }
+    return;
   }
 }
 
@@ -147,6 +227,8 @@ export default {
         const update = await request.json();
         if (update.message) {
           await handleMessage(update.message, env);
+        } else if (update.callback_query) {
+          await handleCallback(update, env);
         }
         return new Response("OK");
       } catch (error) {
