@@ -56,8 +56,80 @@ async function handleMessage(message, env) {
     return;
   }
 
+  // --- Admin Movie Upload Feature ---
+  if (text === "/addmovie") {
+    if (!isOwner(userId, env)) {
+      await sendText(env, chatId, "⛔ Only the Owner can add movies.");
+      return;
+    }
+    await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`upload_step_${userId}`, "title").run();
+    await sendText(env, chatId, "🎬 Send the movie name:");
+    return;
+  }
+
+  // --- Upload Flow Steps ---
+  const uploadStep = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(`upload_step_${userId}`).first();
+  
+  if (uploadStep) {
+    const step = uploadStep.value;
+    const key = `upload_step_${userId}`;
+
+    if (step === "title") {
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_title_${userId}`, text).run();
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, "year").run();
+      await sendText(env, chatId, "📅 Send the release year, or /skip:");
+      return;
+    }
+
+    if (step === "year") {
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_year_${userId}`, text === "/skip" ? null : text).run();
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, "description").run();
+      await sendText(env, chatId, "📝 Send a short description, or /skip:");
+      return;
+    }
+
+    if (step === "description") {
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_description_${userId}`, text === "/skip" ? null : text).run();
+      await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, "file").run();
+      await sendText(env, chatId, "📥 Now send the movie file (Video/Document):");
+      return;
+    }
+
+    if (step === "file") {
+      if (message.document || message.video) {
+        const fileId = message.document?.file_id || message.video?.file_id;
+        const title = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(`temp_title_${userId}`).first();
+        const year = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(`temp_year_${userId}`).first();
+        const desc = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(`temp_description_${userId}`).first();
+
+        await env.DB.prepare(
+          "INSERT INTO movies (title, year, description, telegram_file_id) VALUES (?, ?, ?, ?)"
+        ).bind(title?.value, year?.value, desc?.value, fileId).run();
+
+        // Clean up temp data
+        await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run();
+        await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+
+        await sendText(env, chatId, "✅ Movie added successfully!");
+        return;
+      } else {
+        await sendText(env, chatId, "⚠️ Please send a valid file.");
+        return;
+      }
+    }
+  }
+
+  // --- Search Feature ---
   if (text && !text.startsWith("/")) {
-    await sendText(env, chatId, `🔎 Searching for "${text}"... (Feature coming soon)`);
+    const search = `%${text}%`;
+    const movies = await env.DB.prepare("SELECT title FROM movies WHERE title LIKE ? LIMIT 5").bind(search).all();
+    
+    if (movies.results.length === 0) {
+      await sendText(env, chatId, "😕 No movies found for that search.");
+    } else {
+      const reply = "🔎 Found movies:\n\n" + movies.results.map(m => `🎬 ${m.title}`).join("\n");
+      await sendText(env, chatId, reply);
+    }
   }
 }
 
