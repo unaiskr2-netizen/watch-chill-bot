@@ -102,7 +102,7 @@ async function handleMessage(message, env) {
   if (text === "/addmovie") {
     if (!isAdmin) return await sendText(env, chatId, "⛔ Admin only.");
     await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`upload_step_${userId}`, "title").run();
-    await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run(); // clear old temp
+    await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run();
     return await sendText(env, chatId, "🎬 Send the movie name:");
   }
 
@@ -119,7 +119,7 @@ async function handleMessage(message, env) {
     if (step === "year") {
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_year_${userId}`, text === "/skip" ? "" : text).run();
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, "quality").run();
-      return await sendText(env, chatId, "📺 Send the quality (e.g., 1080p, 720p) (or /skip):");
+      return await sendText(env, chatId, "📺 Send the quality (e.g., 1080p) (or /skip):");
     }
     if (step === "quality") {
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_quality_${userId}`, text === "/skip" ? "" : text).run();
@@ -129,7 +129,7 @@ async function handleMessage(message, env) {
     if (step === "language") {
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_language_${userId}`, text === "/skip" ? "" : text).run();
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, "subtitle").run();
-      return await sendText(env, chatId, "📝 Send subtitle availability (e.g., English) (or /skip):");
+      return await sendText(env, chatId, "📝 Send subtitle availability (or /skip):");
     }
     if (step === "subtitle") {
       await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`temp_subtitle_${userId}`, text === "/skip" ? "" : text).run();
@@ -168,13 +168,17 @@ async function handleMessage(message, env) {
       const poster = await getVal("poster");
       const desc = await getVal("desc");
 
-      await env.DB.prepare(
-        "INSERT INTO movies (title, year, quality, language, subtitle, poster_file_id, description, telegram_file_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(title, year, quality, language, subtitle, poster, desc, fileId).run();
-
-      await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run();
-      await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
-      return await sendText(env, chatId, "✅ Movie added successfully to Database!");
+      try {
+        await env.DB.prepare(
+          "INSERT INTO movies (title, year, quality, language, subtitle, poster_file_id, description, telegram_file_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(title, year, quality, language, subtitle, poster, desc, fileId).run();
+        
+        await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(`temp_%_${userId}`).run();
+        await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+        return await sendText(env, chatId, "✅ Movie added successfully to Database!");
+      } catch (e) {
+        return await sendText(env, chatId, `❌ Database Error: ${e.message}`);
+      }
     }
   }
 
@@ -200,7 +204,6 @@ async function handleCallback(update, env) {
   const query = update.callback_query;
   const data = query.data || "";
   const chatId = query.message.chat.id;
-  const messageId = query.message.message_id;
 
   await answerCallback(env, query.id);
 
